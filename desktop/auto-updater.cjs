@@ -12,6 +12,12 @@ const path = require("path");
 const fs = require("fs");
 
 const CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 小时
+const DIGEST_ASSET_NAME = "release-digest.v1.json";
+const DEFAULT_GITHUB_OWNER = "liliMozi";
+const DEFAULT_GITHUB_REPO = "openhanako";
+const DEFAULT_ATOMGIT_OWNER = "liliMozi";
+const DEFAULT_ATOMGIT_REPO = "OpenHanako";
+const DEFAULT_ATOMGIT_RELEASE_BASE_URL = `https://gitcode.com/${DEFAULT_ATOMGIT_OWNER}/${DEFAULT_ATOMGIT_REPO}/releases/download`;
 
 let _mainWindow = null;
 let _setIsUpdating = null;  // 由 main.cjs 注入
@@ -20,6 +26,62 @@ let _checkTimer = null;
 let _ipcHandlersRegistered = false;
 let _updaterConfigured = false;
 let _installPromise = null;
+let _digestRequestId = 0;
+
+function trimTrailingSlash(value) {
+  return String(value || "").replace(/\/+$/, "");
+}
+
+function ensureTrailingSlash(value) {
+  const trimmed = trimTrailingSlash(value);
+  return trimmed ? `${trimmed}/` : "";
+}
+
+function resolveUpdateFeedConfig(env = process.env) {
+  const explicitFeedUrl = env.HANA_UPDATE_FEED_URL || "";
+  const source = String(env.HANA_UPDATE_SOURCE || env.HANA_UPDATE_PROVIDER || "").trim().toLowerCase();
+  const digestBaseUrl = env.HANA_UPDATE_DIGEST_BASE_URL || "";
+
+  if (explicitFeedUrl) {
+    const feedUrl = ensureTrailingSlash(explicitFeedUrl);
+    return {
+      feedURL: { provider: "generic", url: feedUrl },
+      source: {
+        provider: source || "generic",
+        feedUrl,
+      },
+      digestBaseUrl: digestBaseUrl || `${feedUrl}{asset}`,
+    };
+  }
+
+  if (source === "atomgit" || source === "gitcode") {
+    const feedUrl = env.HANA_ATOMGIT_UPDATE_FEED_URL || `${DEFAULT_ATOMGIT_RELEASE_BASE_URL}/latest`;
+    return {
+      feedURL: { provider: "generic", url: ensureTrailingSlash(feedUrl) },
+      source: {
+        provider: "atomgit",
+        feedUrl: ensureTrailingSlash(feedUrl),
+      },
+      digestBaseUrl: digestBaseUrl || env.HANA_ATOMGIT_RELEASE_BASE_URL || DEFAULT_ATOMGIT_RELEASE_BASE_URL,
+    };
+  }
+
+  return {
+    feedURL: {
+      provider: "github",
+      owner: DEFAULT_GITHUB_OWNER,
+      repo: DEFAULT_GITHUB_REPO,
+    },
+    source: {
+      provider: "github",
+      owner: DEFAULT_GITHUB_OWNER,
+      repo: DEFAULT_GITHUB_REPO,
+    },
+    digestBaseUrl: digestBaseUrl || `https://github.com/${DEFAULT_GITHUB_OWNER}/${DEFAULT_GITHUB_REPO}/releases/download`,
+  };
+}
+
+let _updateFeedConfig = resolveUpdateFeedConfig();
 
 /**
  * 读 preferences.json 里的 auto_check_updates，默认 true。
@@ -38,15 +100,23 @@ function isAutoCheckEnabled() {
 
 // ── 状态管理（保持与前端 AutoUpdateState 契约一致）──
 
-let _updateState = {
-  status: "idle",       // idle | checking | available | downloading | downloaded | installing | error | latest
-  version: null,
-  releaseNotes: null,
-  releaseUrl: null,
-  downloadUrl: null,
-  progress: null,
-  error: null,
-};
+function createIdleState() {
+  return {
+    status: "idle",       // idle | checking | available | downloading | downloaded | installing | error | latest
+    version: null,
+    releaseNotes: null,
+    releaseUrl: null,
+    downloadUrl: null,
+    progress: null,
+    error: null,
+    digest: null,
+    digestUrl: null,
+    digestError: null,
+    updateSource: _updateFeedConfig.source,
+  };
+}
+
+let _updateState = createIdleState();
 
 function getState() {
   return { ..._updateState };
@@ -96,10 +166,110 @@ function setState(patch) {
 }
 
 function resetState() {
-  _updateState = {
-    status: "idle", version: null, releaseNotes: null,
-    releaseUrl: null, downloadUrl: null, progress: null, error: null,
+  _digestRequestId += 1;
+  _updateState = createIdleState();
+}
+
+function tagFromVersion(version) {
+  const value = String(version || "").trim();
+  if (!value) return "";
+  return value.startsWith("v") ? value : `v${value}`;
+}
+
+function buildReleaseAssetUrl(baseUrl, tag, assetName) {
+  const base = String(baseUrl || "").trim();
+  if (!base) return null;
+  const version = tag.startsWith("v") ? tag.slice(1) : tag;
+  if (base.includes("{tag}") || base.includes("{version}") || base.includes("{asset}")) {
+    return base
+      .replaceAll("{tag}", encodeURIComponent(tag))
+      .replaceAll("{version}", encodeURIComponent(version))
+      .replaceAll("{asset}", encodeURIComponent(assetName));
+  }
+  return `${trimTrailingSlash(base)}/${encodeURIComponent(tag)}/${encodeURIComponent(assetName)}`;
+}
+
+function buildReleaseDigestUrl(version, feedConfig = _updateFeedConfig) {
+  const tag = tagFromVersion(version);
+  if (!tag) return null;
+  return buildReleaseAssetUrl(feedConfig.digestBaseUrl, tag, DIGEST_ASSET_NAME);
+}
+
+function isLocalizedText(value) {
+  return Boolean(value)
+    && typeof value === "object"
+    && typeof value.zh === "string"
+    && typeof value.en === "string";
+}
+
+function normalizeReleaseDigest(value, expectedVersion) {
+  if (!value || typeof value !== "object") return null;
+  if (value.schemaVersion !== 1) return null;
+  if (typeof value.tag !== "string" || typeof value.version !== "string") return null;
+  if (expectedVersion && value.version !== expectedVersion && value.tag !== tagFromVersion(expectedVersion)) {
+    return null;
+  }
+  if (!isLocalizedText(value.summary)) return null;
+  const counts = value.counts && typeof value.counts === "object" ? value.counts : {};
+  const items = Array.isArray(value.items)
+    ? value.items
+      .filter(item => item && typeof item === "object" && isLocalizedText(item.title) && isLocalizedText(item.summary))
+      .map(item => ({
+        id: typeof item.id === "string" ? item.id : "",
+        kind: typeof item.kind === "string" ? item.kind : "improvement",
+        importance: typeof item.importance === "string" ? item.importance : "medium",
+        title: item.title,
+        summary: item.summary,
+        details: Array.isArray(item.details) ? item.details.filter(isLocalizedText) : [],
+        sources: Array.isArray(item.sources) ? item.sources : [],
+      }))
+    : [];
+  return {
+    schemaVersion: 1,
+    tag: value.tag,
+    version: value.version,
+    previousTag: typeof value.previousTag === "string" ? value.previousTag : "",
+    generatedAt: typeof value.generatedAt === "string" ? value.generatedAt : "",
+    noUserFacingChanges: Boolean(value.noUserFacingChanges),
+    summary: value.summary,
+    counts: {
+      feature: Number.isInteger(counts.feature) ? counts.feature : 0,
+      fix: Number.isInteger(counts.fix) ? counts.fix : 0,
+      improvement: Number.isInteger(counts.improvement) ? counts.improvement : 0,
+      migration: Number.isInteger(counts.migration) ? counts.migration : 0,
+    },
+    items,
   };
+}
+
+function requestReleaseDigest(version) {
+  const digestUrl = buildReleaseDigestUrl(version);
+  const requestId = _digestRequestId + 1;
+  _digestRequestId = requestId;
+  setState({ digest: null, digestUrl, digestError: null });
+  if (!digestUrl || typeof fetch !== "function") return;
+
+  fetch(digestUrl, {
+    headers: { Accept: "application/json" },
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`release digest request failed: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then((payload) => {
+      if (requestId !== _digestRequestId || _updateState.version !== version) return;
+      const digest = normalizeReleaseDigest(payload, version);
+      if (!digest) throw new Error("release digest payload is invalid");
+      setState({ digest, digestUrl, digestError: null });
+    })
+    .catch((error) => {
+      if (requestId !== _digestRequestId || _updateState.version !== version) return;
+      const message = error?.message || String(error);
+      logUpdate(`release digest unavailable: ${message}`);
+      setState({ digest: null, digestUrl, digestError: message });
+    });
 }
 
 function getQuitAndInstallOptions() {
@@ -255,11 +425,9 @@ async function dirSize(dir) {
 
 function setupAutoUpdater() {
   // 显式设置 feed URL，不依赖 app-update.yml（electron-builder --dir 不生成该文件）
-  autoUpdater.setFeedURL({
-    provider: "github",
-    owner: "liliMozi",
-    repo: "openhanako",
-  });
+  _updateFeedConfig = resolveUpdateFeedConfig();
+  setState({ updateSource: _updateFeedConfig.source });
+  autoUpdater.setFeedURL(_updateFeedConfig.feedURL);
 
   autoUpdater.autoDownload = false;          // 由我们控制（磁盘空间检查后手动触发）
   autoUpdater.autoInstallOnAppQuit = false;  // 只在用户明确点击"重启更新"时安装
@@ -273,7 +441,7 @@ function setupAutoUpdater() {
 
   autoUpdater.on("checking-for-update", () => {
     logUpdate("checking for update");
-    setState({ status: "checking", progress: null, error: null });
+    setState({ status: "checking", progress: null, error: null, digest: null, digestUrl: null, digestError: null });
   });
 
   autoUpdater.on("update-available", async (info) => {
@@ -283,12 +451,16 @@ function setupAutoUpdater() {
       version: info.version,
       progress: null,
       error: null,
+      digest: null,
+      digestUrl: null,
+      digestError: null,
       releaseNotes: typeof info.releaseNotes === "string"
         ? info.releaseNotes
         : Array.isArray(info.releaseNotes)
           ? info.releaseNotes.map(n => n.note || n).join("\n")
           : null,
     });
+    if (info.version) requestReleaseDigest(info.version);
 
     // 磁盘空间检查
     const ok = await hasSufficientDiskSpace(app.getPath("userData"), 500);
@@ -324,11 +496,12 @@ function setupAutoUpdater() {
       version: info.version,
       progress: null,
     });
+    if (info.version && !_updateState.digest) requestReleaseDigest(info.version);
   });
 
   autoUpdater.on("update-not-available", () => {
     logUpdate("update not available");
-    setState({ status: "latest" });
+    setState({ status: "latest", digest: null, digestUrl: null, digestError: null });
   });
 
   autoUpdater.on("error", (err) => {
@@ -439,4 +612,14 @@ function setMainWindow(win) {
   _mainWindow = win;
 }
 
-module.exports = { initAutoUpdater, checkForUpdatesAuto, setMainWindow, setUpdateChannel, getState, installDownloadedUpdate };
+module.exports = {
+  initAutoUpdater,
+  checkForUpdatesAuto,
+  setMainWindow,
+  setUpdateChannel,
+  getState,
+  installDownloadedUpdate,
+  resolveUpdateFeedConfig,
+  buildReleaseDigestUrl,
+  normalizeReleaseDigest,
+};

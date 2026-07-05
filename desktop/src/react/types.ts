@@ -2,6 +2,42 @@ import type { ThinkingLevel } from './stores/model-slice';
 
 // ── Auto-update ──
 
+export interface LocalizedReleaseText {
+  zh: string;
+  en: string;
+}
+
+export interface ReleaseDigestItem {
+  id: string;
+  kind: 'feature' | 'fix' | 'improvement' | 'migration';
+  importance: 'high' | 'medium' | 'low';
+  title: LocalizedReleaseText;
+  summary: LocalizedReleaseText;
+  details: LocalizedReleaseText[];
+  sources?: Array<{
+    type?: string;
+    ref?: string;
+    title?: string;
+  }>;
+}
+
+export interface ReleaseDigest {
+  schemaVersion: 1;
+  tag: string;
+  version: string;
+  previousTag: string;
+  generatedAt: string;
+  noUserFacingChanges: boolean;
+  summary: LocalizedReleaseText;
+  counts: {
+    feature: number;
+    fix: number;
+    improvement: number;
+    migration: number;
+  };
+  items: ReleaseDigestItem[];
+}
+
 export interface AutoUpdateState {
   status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error' | 'latest';
   version: string | null;
@@ -15,6 +51,15 @@ export interface AutoUpdateState {
     total: number;
   } | null;
   error: string | null;
+  digest?: ReleaseDigest | null;
+  digestUrl?: string | null;
+  digestError?: string | null;
+  updateSource?: {
+    provider: string;
+    owner?: string;
+    repo?: string;
+    feedUrl?: string;
+  } | null;
 }
 
 export interface AutoLaunchStatus {

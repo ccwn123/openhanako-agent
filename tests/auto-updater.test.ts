@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Mocks（必须在 import 之前声明）──
 
@@ -56,6 +56,12 @@ describe("auto-updater", () => {
     mockAutoUpdater.allowPrerelease = false;
     mockAutoUpdater.installDirectory = undefined;
     mockExePath = "/Applications/HanaAgent.app/Contents/MacOS/HanaAgent";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: vi.fn().mockResolvedValue("not found"),
+      json: vi.fn(),
+    }));
 
     ({ ipcMain } = await import("electron"));
     ipcMain.handle.mockImplementation((name, handler) => {
@@ -63,6 +69,10 @@ describe("auto-updater", () => {
     });
 
     mod = await import("../desktop/auto-updater.cjs");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   function createMockWindow() {
@@ -89,8 +99,35 @@ describe("auto-updater", () => {
 
   it("should configure autoUpdater correctly", () => {
     initWithMockWindow();
+    expect(mockAutoUpdater.setFeedURL).toHaveBeenCalledWith({
+      provider: "github",
+      owner: "liliMozi",
+      repo: "openhanako",
+    });
     expect(mockAutoUpdater.autoDownload).toBe(false);
     expect(mockAutoUpdater.autoInstallOnAppQuit).toBe(false);
+  });
+
+  it("resolves AtomGit as a generic update feed with matching digest URLs", () => {
+    const config = mod.resolveUpdateFeedConfig({ HANA_UPDATE_SOURCE: "atomgit" });
+    expect(config.feedURL).toEqual({
+      provider: "generic",
+      url: "https://gitcode.com/liliMozi/OpenHanako/releases/download/latest/",
+    });
+    expect(mod.buildReleaseDigestUrl("0.425.4", config)).toBe(
+      "https://gitcode.com/liliMozi/OpenHanako/releases/download/v0.425.4/release-digest.v1.json",
+    );
+  });
+
+  it("loads digest from the generic feed directory when an explicit feed URL is configured", () => {
+    const config = mod.resolveUpdateFeedConfig({ HANA_UPDATE_FEED_URL: "https://updates.example.com/hana/stable" });
+    expect(config.feedURL).toEqual({
+      provider: "generic",
+      url: "https://updates.example.com/hana/stable/",
+    });
+    expect(mod.buildReleaseDigestUrl("0.425.4", config)).toBe(
+      "https://updates.example.com/hana/stable/release-digest.v1.json",
+    );
   });
 
   it("pins the NSIS install directory to the running exe directory on Windows", async () => {
@@ -167,6 +204,49 @@ describe("auto-updater", () => {
       handlers["update-downloaded"]({ version: "2.0.0" });
     }
     expect(mod.getState().status).toBe("downloaded");
+  });
+
+  it("loads release digest metadata without changing the downloaded update contract", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        schemaVersion: 1,
+        tag: "v2.0.0",
+        version: "2.0.0",
+        previousTag: "v1.9.9",
+        generatedAt: "2026-07-05T00:00:00.000Z",
+        noUserFacingChanges: false,
+        summary: { zh: "更新更清楚", en: "Clearer updates" },
+        counts: { feature: 1, fix: 0, improvement: 0, migration: 0 },
+        items: [
+          {
+            id: "digest",
+            kind: "feature",
+            importance: "high",
+            title: { zh: "更新摘要", en: "Update digest" },
+            summary: { zh: "About 页能看到更新内容", en: "The About page shows update content" },
+            details: [],
+            sources: [],
+          },
+        ],
+      }),
+    }));
+    initWithMockWindow();
+
+    if (handlers["update-downloaded"]) {
+      handlers["update-downloaded"]({ version: "2.0.0" });
+    }
+
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(mod.getState()).toEqual(expect.objectContaining({
+      status: "downloaded",
+      version: "2.0.0",
+      digest: expect.objectContaining({
+        summary: { zh: "更新更清楚", en: "Clearer updates" },
+      }),
+    }));
   });
 
   it("broadcasts update state to every live renderer window", () => {

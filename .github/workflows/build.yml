@@ -250,6 +250,20 @@ jobs:
         run: |
           node scripts/merge-latest-mac-yml.cjs artifacts latest-mac.yml
 
+      # 生成 About 页展示的双语更新摘要。release job 只在 tag 上跑；
+      # 摘要使用当前 draft release notes + 上一个 tag 到当前 tag 的 commits。
+      - name: Generate bilingual release digest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_RELEASE_DIGEST_MODEL || 'gpt-5.5' }}
+        run: |
+          node scripts/generate-release-digest.mjs \
+            --tag "${{ github.ref_name }}" \
+            --previous-tag auto \
+            --out release-digest.v1.json \
+            --source-out release-digest-source.json
+
       # 单点上传所有 release assets（dmg/zip/exe/AppImage/deb/yml），blockmap 不上传
       - name: Upload release assets
         env:
@@ -276,6 +290,9 @@ jobs:
           echo "=== Uploading latest-mac.yml (merged) ==="
           gh release upload "${{ github.ref_name }}" latest-mac.yml --clobber
 
+          echo "=== Uploading release digest ==="
+          gh release upload "${{ github.ref_name }}" release-digest.v1.json --clobber
+
           echo "=== Uploading latest-linux.yml ==="
           LINUX_YML=$(find artifacts -name 'latest-linux.yml' | head -1)
           if [ -n "$LINUX_YML" ]; then
@@ -301,6 +318,7 @@ jobs:
           echo "$ASSETS" | grep -qx 'latest-mac.yml' || MISSING+=("latest-mac.yml")
           echo "$ASSETS" | grep -qx 'latest.yml' || MISSING+=("latest.yml")
           echo "$ASSETS" | grep -qx 'latest-linux.yml' || MISSING+=("latest-linux.yml")
+          echo "$ASSETS" | grep -qx 'release-digest.v1.json' || MISSING+=("release-digest.v1.json")
           echo "$ASSETS" | grep -qE '^HanaAgent-.*-macOS-arm64\.dmg$' || MISSING+=("macOS-arm64.dmg")
           echo "$ASSETS" | grep -qE '^HanaAgent-.*-macOS-arm64\.zip$' || MISSING+=("macOS-arm64.zip")
           echo "$ASSETS" | grep -qE '^HanaAgent-.*-macOS-x64\.dmg$' || MISSING+=("macOS-x64.dmg")
