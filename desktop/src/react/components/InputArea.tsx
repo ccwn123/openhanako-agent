@@ -604,9 +604,15 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
 
   // Focus trigger from store
   const inputFocusTrigger = useStore(s => s.inputFocusTrigger);
+  const inputFocusTriggerSource = useStore(s => s.inputFocusTriggerSource);
   useEffect(() => {
-    if (inputFocusTrigger > 0) restoreEditorFocus();
-  }, [inputFocusTrigger, restoreEditorFocus]);
+    if (inputFocusTrigger <= 0) return;
+    // 'restore' (turn-end give-the-focus-back-to-the-editor convenience) is desktop-only: on
+    // mobile/PWA it pops the on-screen keyboard every time a reply finishes (#2045 symptom 3).
+    // 'gesture' (explicit user action, e.g. quoting a selection) is never blocked.
+    if (inputFocusTriggerSource === 'restore' && surface !== 'desktop') return;
+    restoreEditorFocus();
+  }, [inputFocusTrigger, inputFocusTriggerSource, restoreEditorFocus, surface]);
 
   useEffect(() => {
     if (surface !== 'desktop') return;

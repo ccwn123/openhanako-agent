@@ -51,6 +51,8 @@ export interface InputSlice {
   deskContextAttached: boolean;
   docContextAttached: boolean;
   inputFocusTrigger: number;
+  /** Source of the most recent requestInputFocus() call; consumers gate 'restore' by surface. */
+  inputFocusTriggerSource: 'gesture' | 'restore';
   quoteCandidate: QuotedSelection | null;
   quotedSelections: QuotedSelection[];
   /** @deprecated Use quotedSelections for committed quotes and quoteCandidate for transient selection UI. */
@@ -65,7 +67,7 @@ export interface InputSlice {
   toggleDeskContext: () => void;
   setDocContextAttached: (attached: boolean) => void;
   toggleDocContext: () => void;
-  requestInputFocus: () => void;
+  requestInputFocus: (source?: 'gesture' | 'restore') => void;
   setQuoteCandidate: (sel: QuotedSelection) => void;
   clearQuoteCandidate: () => void;
   addQuotedSelection: (sel: QuotedSelection) => void;
@@ -103,6 +105,7 @@ export const createInputSlice = (
   deskContextAttached: false,
   docContextAttached: false,
   inputFocusTrigger: 0,
+  inputFocusTriggerSource: 'gesture',
   quoteCandidate: null,
   quotedSelections: [],
   quotedSelection: null,
@@ -138,8 +141,8 @@ export const createInputSlice = (
   setDocContextAttached: (attached) => set({ docContextAttached: attached }),
   toggleDocContext: () =>
     set((s) => ({ docContextAttached: !s.docContextAttached })),
-  requestInputFocus: () =>
-    set((s) => ({ inputFocusTrigger: s.inputFocusTrigger + 1 })),
+  requestInputFocus: (source = 'gesture') =>
+    set((s) => ({ inputFocusTrigger: s.inputFocusTrigger + 1, inputFocusTriggerSource: source })),
   setQuoteCandidate: (sel) => set({ quoteCandidate: sel }),
   clearQuoteCandidate: () => set({ quoteCandidate: null }),
   addQuotedSelection: (sel) =>
