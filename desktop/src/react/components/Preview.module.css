@@ -452,7 +452,7 @@
 .previewPanelBody :global(.preview-csv) thead th {
     position: sticky;
     top: 0;
-    background: var(--tool-bg);
+    background: var(--overlay-subtle);
     font-weight: 600;
     z-index: 1;
 }
