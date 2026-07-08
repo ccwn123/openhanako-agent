@@ -244,8 +244,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
 
   function isDeletedAgentSessionPath(sessionPath) {
     if (!sessionPath) return false;
-    const agentId = engine.agentIdFromSessionPath?.(sessionPath) || null;
-    return !!agentId && engine.isAgentDeleted?.(agentId) === true;
+    return engine.isDeletedAgentSession?.(sessionPath) === true;
   }
 
   function rejectDeletedAgentSession(ws, sessionPath) {

@@ -420,7 +420,7 @@ export function createSessionsRoute(engine, hub = null) {
     }
 
     const inferredAgentId = sessionPath
-      ? engine.agentIdFromSessionPath?.(sessionPath) || null
+      ? engine.resolveSessionOwnership?.(sessionPath)?.agentId || null
       : null;
     if (!inferredAgentId) return;
 
@@ -516,7 +516,7 @@ export function createSessionsRoute(engine, hub = null) {
 
   function getSessionSummaryRecord(sessionPath, agentIdHint = null) {
     if (!sessionPath) return null;
-    const agentId = agentIdHint || engine.agentIdFromSessionPath?.(sessionPath) || null;
+    const agentId = agentIdHint || engine.resolveSessionOwnership?.(sessionPath)?.agentId || null;
     if (!agentId) return null;
     const agent = engine.getAgent?.(agentId) || null;
     const summaryManager = agent?.summaryManager || null;
@@ -572,7 +572,7 @@ export function createSessionsRoute(engine, hub = null) {
     }
     for (const sessionPath of uniqueLifecyclePaths(paths)) {
       const sessionPathText = typeof sessionPath === "string" ? sessionPath : "";
-      const agentId = engine.agentIdFromSessionPath?.(sessionPathText) || "unknown-agent";
+      const agentId = engine.resolveSessionOwnership?.(sessionPathText)?.agentId || "unknown-agent";
       const basename = path.basename(sessionPathText);
       if (basename) return `legacy:${agentId}:${basename}`;
     }
@@ -720,8 +720,7 @@ export function createSessionsRoute(engine, hub = null) {
 
   function isDeletedAgentSessionPath(sessionPath) {
     if (!sessionPath) return false;
-    const agentId = engine.agentIdFromSessionPath?.(sessionPath) || null;
-    return !!agentId && engine.isAgentDeleted?.(agentId) === true;
+    return engine.isDeletedAgentSession?.(sessionPath) === true;
   }
 
   function rejectDeletedAgentSession(c) {
@@ -1907,8 +1906,8 @@ export function createSessionsRoute(engine, hub = null) {
 
       const session = engine.getSessionByPath(sessionPath);
 
-      // 从 sessionPath 解析 agentId，避免依赖 engine 焦点指针的时序
-      const switchedAgentId = engine.agentIdFromSessionPath(sessionPath) || engine.currentAgentId;
+      // 从 manifest 归属解析 agentId，避免依赖 engine 焦点指针的时序
+      const switchedAgentId = engine.resolveSessionOwnership?.(sessionPath)?.agentId || engine.currentAgentId;
       const switchedAgent = engine.getAgent(switchedAgentId);
 
       // switchSession 已同步设置焦点到目标 session。
