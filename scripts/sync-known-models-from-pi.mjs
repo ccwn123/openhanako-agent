@@ -68,7 +68,10 @@ const FIELD_MAP = [
 // 大意：anthropic 两条为 1M beta 口径（会拉高压缩阈值致溢出）；
 // openrouter/mistral 系 maxOutput 为 models.dev 保守默认 4096（会硬截长输出）；
 // grok-code-fast-1 三条与 mistral-small reasoning 为方向存疑的能力翻转。
+// minimax/MiniMax-M3.context 为用户策展值（2026-07-08）：实测 500k 以上
+// 基本不可用，词典取 500000，不取官方 1M；known-model-fallbacks.json 同值。
 const EXCLUDED_UPDATES = new Set([
+  "minimax/MiniMax-M3.context",
   "anthropic/claude-opus-4-6.context",
   "anthropic/claude-sonnet-4-6.context",
   "mistral/codestral-latest.maxOutput",

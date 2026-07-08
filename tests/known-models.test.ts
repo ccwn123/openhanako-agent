@@ -317,16 +317,17 @@ describe("known-models dictionary", () => {
   it("declares current MiniMax M-series text and image metadata across billing providers", () => {
     const m3 = {
       name: "MiniMax M3",
-      context: 1000000,
+      // context 为用户策展值：实测 500k 以上基本不可用，不取官方 1M
+      //（sync-known-models-from-pi.mjs 排除表持有此口径）
+      context: 500000,
       maxOutput: 128000,
       image: true,
       reasoning: true,
     };
     expect(lookupKnown("minimax", "MiniMax-M3")).toEqual(m3);
     // minimax-token-plan 不在词典分区内，经 known-model-fallbacks.json 兜底解析；
-    // 2026-07-08 对表只刷新了词典（minimax 分区 maxOutput 524288 → 128000），
-    // fallbacks 文件不在对表范围，两个数据源在此值上暂时分叉。
-    expect(lookupKnown("minimax-token-plan", "MiniMax-M3")).toEqual({ ...m3, maxOutput: 524288 });
+    // 2026-07-08 起两个数据源已对齐同值。
+    expect(lookupKnown("minimax-token-plan", "MiniMax-M3")).toEqual(m3);
     expect(lookupKnown("minimax", "MiniMax-M2.1-highspeed")).toEqual({
       name: "MiniMax M2.1 Highspeed",
       context: 204800,
@@ -345,7 +346,7 @@ describe("known-models dictionary", () => {
       context: 400000,
     });
     expect(lookupKnown("unknown-provider", "gpt-5.5")).toMatchObject({
-      context: 1050000,
+      context: 272000,
     });
   });
 
