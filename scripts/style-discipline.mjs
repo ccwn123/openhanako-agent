@@ -76,7 +76,7 @@ export function scan(root = CSS_ROOT) {
   const result = {};
   for (const file of collectCssFiles(root)) {
     const css = stripCssComments(fs.readFileSync(file, "utf-8"));
-    const rel = path.relative(process.cwd(), file);
+    const rel = path.relative(process.cwd(), file).split(path.sep).join("/");
     const counts = {
       "bare-spacing": findBareSpacing(css).length,
       "hardcoded-color": findHardcodedColors(css).length,
