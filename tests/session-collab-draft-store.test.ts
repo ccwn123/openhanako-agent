@@ -48,6 +48,30 @@ describe("SessionCollabDraftStore", () => {
     expect(retry.ok).toBe(true);
   });
 
+  it("并发二次 apply 在首次未决期间被拒绝，闭包只执行一次", async () => {
+    const store = new SessionCollabDraftStore();
+    let resolveApply: (v: unknown) => void;
+    const apply = vi.fn(() => new Promise((res) => { resolveApply = res; }));
+    const { suggestionId } = store.create(makeEntry({ apply }));
+    const first = store.apply(suggestionId, {});
+    const second = await store.apply(suggestionId, {});
+    expect(second).toEqual({ ok: false, reason: "in-flight" });
+    resolveApply!("done");
+    await expect(first).resolves.toMatchObject({ ok: true });
+    expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it("首次 apply 失败后 in-flight 标记清除，重试可成功", async () => {
+    const store = new SessionCollabDraftStore();
+    const apply = vi.fn()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValueOnce("ok");
+    const { suggestionId } = store.create(makeEntry({ apply }));
+    await expect(store.apply(suggestionId, {})).rejects.toThrow("boom");
+    const retry = await store.apply(suggestionId, {});
+    expect(retry.ok).toBe(true);
+  });
+
   it("listForSession 按源 sessionId 过滤", () => {
     const store = new SessionCollabDraftStore();
     store.create(makeEntry({ sourceSessionId: "a" }));

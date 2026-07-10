@@ -53,14 +53,21 @@ export class SessionCollabDraftStore {
   async apply(suggestionId: string, editedDraft?: Record<string, unknown>) {
     const entry = this._entries.get(suggestionId);
     if (!entry) return { ok: false as const, reason: "not-found" as const };
-    // 闭包抛错时不删条目：让用户可重试（对齐 AutomationSuggestionStore）
-    const result = await entry.apply(editedDraft);
-    this._entries.delete(suggestionId);
-    return { ok: true as const, result };
+    if (entry._applying) return { ok: false as const, reason: "in-flight" as const };
+    entry._applying = true;
+    try {
+      // 闭包抛错时不删条目：让用户可重试（对齐 AutomationSuggestionStore）
+      const result = await entry.apply(editedDraft);
+      this._entries.delete(suggestionId);
+      return { ok: true as const, result };
+    } finally {
+      // 失败路径清标记让用户可重试；成功路径条目已删，清标记无副作用
+      entry._applying = false;
+    }
   }
 
   _publicEntry(entry: any) {
-    const { apply: _apply, ...rest } = entry;
+    const { apply: _apply, _applying: _inFlight, ...rest } = entry;
     return { ...rest, draft: JSON.parse(JSON.stringify(entry.draft)) };
   }
 }
