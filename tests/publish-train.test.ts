@@ -336,13 +336,19 @@ describe("publish-train: publishChannel", () => {
   }
 
   const boxes = { serverEntries: sampleServerEntries(), rendererEntry: sampleRendererEntry() };
-  const env = { HANA_SIGN_KEY: "/dev/null" }; // requireSignKeyPath only checks existence; /dev/null exists everywhere this test runs
+
+  function makeSigningEnv() {
+    const dir = makeTempDir("hana-publish-train-signing-");
+    const signKeyPath = path.join(dir, "test-signing-key.pem");
+    fs.writeFileSync(signKeyPath, "test signing key fixture");
+    return { HANA_SIGN_KEY: signKeyPath };
+  }
 
   it("dry-run computes and prints the plan but calls zero publish operations", async () => {
     const deps = baseDeps();
     const result = await publishChannel({
       tag: "v1.2.3", channel: "stable", dryRun: true, repo: "liliMozi/openhanako",
-      releasedAt: "2026-07-11T00:00:00.000Z", boxes, env, deps, log: () => {},
+      releasedAt: "2026-07-11T00:00:00.000Z", boxes, env: makeSigningEnv(), deps, log: () => {},
     });
     expect(result.action).toBe("dry-run");
     expect(result.train).toBe(1);
@@ -355,7 +361,7 @@ describe("publish-train: publishChannel", () => {
     const deps = baseDeps(); // releaseExists() -> false for everything: channels AND train-1 are both new
     const result = await publishChannel({
       tag: "v1.2.3", channel: "stable", dryRun: false, repo: "liliMozi/openhanako",
-      releasedAt: "2026-07-11T00:00:00.000Z", boxes, env, deps, log: () => {},
+      releasedAt: "2026-07-11T00:00:00.000Z", boxes, env: makeSigningEnv(), deps, log: () => {},
     });
     expect(result).toEqual({ action: "created", channel: "stable", train: 1, trainTag: "train-1" });
     expect(deps.createRelease).toHaveBeenCalledTimes(2);
@@ -372,7 +378,7 @@ describe("publish-train: publishChannel", () => {
     });
     const result = await publishChannel({
       tag: "v1.2.3", channel: "beta", dryRun: false, repo: "liliMozi/openhanako",
-      releasedAt: "2026-07-11T00:00:00.000Z", boxes, env, deps, log: () => {},
+      releasedAt: "2026-07-11T00:00:00.000Z", boxes, env: makeSigningEnv(), deps, log: () => {},
     });
     expect(result.action).toBe("created");
     expect(deps.createRelease).toHaveBeenCalledTimes(1); // only train-1 (channels already exists)
@@ -402,7 +408,7 @@ describe("publish-train: publishChannel", () => {
 
     const result = await publishChannel({
       tag: "v1.2.3", channel: "stable", dryRun: false, repo: "liliMozi/openhanako",
-      releasedAt: "2026-07-11T00:00:00.000Z", boxes, env, deps, log: () => {},
+      releasedAt: "2026-07-11T00:00:00.000Z", boxes, env: makeSigningEnv(), deps, log: () => {},
     });
 
     expect(result).toEqual({ action: "resumed", channel: "stable", train: 6, trainTag: "train-6" });
@@ -433,7 +439,7 @@ describe("publish-train: publishChannel", () => {
     await expect(
       publishChannel({
         tag: "v1.2.3", channel: "stable", dryRun: false, repo: "liliMozi/openhanako",
-        releasedAt: "2026-07-11T00:00:00.000Z", boxes, env, deps, log: () => {},
+        releasedAt: "2026-07-11T00:00:00.000Z", boxes, env: makeSigningEnv(), deps, log: () => {},
       }),
     ).rejects.toThrow(/real conflict, not a safe resume/);
     expect(deps.createRelease).not.toHaveBeenCalled();
@@ -449,7 +455,7 @@ describe("publish-train: publishChannel", () => {
     await expect(
       publishChannel({
         tag: "v1.2.3", channel: "stable", dryRun: false, repo: "liliMozi/openhanako",
-        releasedAt: "2026-07-11T00:00:00.000Z", boxes, env, deps, log: () => {},
+        releasedAt: "2026-07-11T00:00:00.000Z", boxes, env: makeSigningEnv(), deps, log: () => {},
       }),
     ).rejects.toThrow(/HTTP 401/);
     expect(deps.createRelease).not.toHaveBeenCalled();
@@ -480,7 +486,7 @@ describe("publish-train: publishChannel", () => {
 
     const result = await publishChannel({
       tag: "v1.2.3", channel: "beta", dryRun: false, repo: "liliMozi/openhanako",
-      releasedAt: "2026-07-11T00:00:00.000Z", boxes, env, deps, log: () => {},
+      releasedAt: "2026-07-11T00:00:00.000Z", boxes, env: makeSigningEnv(), deps, log: () => {},
     });
 
     expect(result.action).toBe("resumed");
